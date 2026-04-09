@@ -2,9 +2,8 @@
 # European_Travel_Analysis
 ### European Travel Destinations: Data Analysis, K-Means Clustering & Recommendation Engine
 
-[![R](https://img.shields.io/badge/R-276DC3?style=for-the-badge&logo=r&logoColor=white)](https://www.r-project.org/)
-[![Quarto](https://img.shields.io/badge/Quarto-4752B2?style=for-the-badge&logo=quarto&logoColor=white)](https://quarto.org/)
-[![Observable JS](https://img.shields.io/badge/Observable_JS-000000?style=for-the-badge&logo=observable&logoColor=white)](https://observablehq.com/)
+[![R-Version](https://img.shields.io/badge/R-4.2+-blue.svg)](https://www.r-project.org/)
+[![Quarto](https://img.shields.io/badge/Rendered%20with-Quarto-emerald)](https://quarto.org/)
 
 ## 專案概述
 本專案透過數據分析解決旅客在面對歐洲眾多景點時的決策困境。透過分析 21 個國家、209 個指標性景點的數據（包含遊客量、生活成本、安全風險），識別了市場中隱藏的消費規律，並利用機器學習（K-Means Clustering）建立目的地人格標籤。
@@ -39,12 +38,12 @@
 
 ---
 
-## 📂 檔案結構
+## 檔案結構
 * `European_Travel.qmd`: 核心分析、可視化與 OJS 工具開發腳本。
 * `cleaned_df_final.csv`: 經過清洗與 K-means 標籤化後的最終數據。
 * `European_Travel.html`: 數據報告。
 
-## 🚀 如何運行
+## 如何運行
 1. 安裝 [RStudio](https://rstudio.com/) 與 [Quarto](https://quarto.org/docs/get-started/)。
 2. 執行 R 指令安裝必要套件：請參考qmd檔。
 3. 下載本專案後，開啟 `.qmd` 檔案並點擊 **"Render"** 即可生成包含互動工具的 HTML 報告。
