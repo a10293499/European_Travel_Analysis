@@ -26,13 +26,13 @@
 ### 1. 資料清洗與特徵工程 (Data Engineering)
 * **修復資料錯位**：如Category中出現如經緯度等數字。
 * **統一標籤**：
-* 旅遊人數：統一成數字，若為範圍數值則取中間值
-* 適合旅遊時間：統一為Spring/Summer/Fall/Winter/Year-round
+  旅遊人數：統一成數字，若為範圍數值則取中間值
+  適合旅遊時間：統一為Spring/Summer/Fall/Winter/Year-round
   
 * **新增標籤**：
-* 貨幣Currency：歐元區/非歐元區
-* 安全等級Safety：拆出安全等級(Safety Level)和需要注意的重點(Safety Notes)
-* 景點類別Category：區分為五大項(人文城市/自然景觀/水岸海島/休閒娛樂/其他)
+  貨幣Currency：歐元區/非歐元區
+  安全等級Safety：拆出安全等級(Safety Level)和需要注意的重點(Safety Notes)
+  景點類別Category：區分為五大項(人文城市/自然景觀/水岸海島/休閒娛樂/其他)
   
 * **複合鍵處理 (Composite Key)**：利用「景點+國家」複合鍵解決如冰島與馬爾他同名 "Blue Lagoon" 的重複匹配問題，確保 209 筆數據的唯一性。
 * **偏態校正**：對遊客量進行 **Log10 轉換**，以消除極端離群值（如巴黎 38M vs 一般景點 0.1M）對模型距離計算的影響。
