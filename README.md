@@ -1,9 +1,13 @@
 # 歐洲旅遊景點數據分析報告 
 # European Travel Destination Analysis
-### European Travel Destinations: Data Analysis, K-Means Clustering & Recommendation Engine
+### European Travel Destinations: Data Analysis, Data Cleaning & K-Means Clustering 
 
 [![R-Version](https://img.shields.io/badge/R-4.2+-blue.svg)](https://www.r-project.org/)
 [![Quarto](https://img.shields.io/badge/Rendered%20with-Quarto-emerald)](https://quarto.org/)
+
+## 線上瀏覽報告
+ [點此查看完整分析網頁](https://a10293499.github.io/European_Travel_Analysis/)
+
 
 ## 專案概述
 本專案透過數據分析解決旅客在面對歐洲眾多景點時的決策困境。透過分析 21 個國家、209 個指標性景點的數據（包含遊客量、生活成本、安全風險），識別了市場中隱藏的消費規律，並利用機器學習（K-Means Clustering）建立目的地人格標籤。
