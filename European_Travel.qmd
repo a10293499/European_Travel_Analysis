@@ -1,0 +1,927 @@
+---
+title: "歐洲旅遊景點數據分析報告"
+subtitle: "資料清整、圖表視覺化、Kmeans分群"
+format: 
+  html:
+    embed-resources: true  
+    toc: true              
+    toc-title: "分析目錄"
+    code-fold: true
+    encoding: "UTF-8"
+execute:
+  warning: false
+  message: false
+---
+
+## **資料**
+
+-   資料來源：<https://www.kaggle.com/datasets/faizadani/european-tour-destinations-dataset>
+
+-   這份資料是一個歐洲旅遊目的地的資料集，涵蓋209個景點，並包含各景點經緯度、每年旅遊人數、貨幣、最佳旅遊時間、生活花費......等欄位。資料
+
+<br>
+
+<br>
+
+## **目標**
+
+藉由這份資料完成
+
+1.  資料清整：包含欄位錯位、統一標籤、轉化數值......等
+
+2.  圖表視覺化
+
+3.  將旅遊地點以K-means分群，使不同旅遊需求的人，可輕易找到適合自己的旅遊地點。
+
+<br>
+
+<br>
+
+## **結果(含R code)**
+
+::: callout-note
+### **執行摘要**：2026 歐洲旅遊市場數據洞察 (Executive Summary)
+
+本報告針對歐洲 21 個國家、209 個熱門景點進行多維度分析，核心發現如下：
+
+市場結構：人文城市為觀光主力，數據顯示超過6成的景點屬於「人文城市 (Urban & Culture)」。在時間分佈上，歐洲旅遊呈現明顯的雙峰趨勢，春季與秋季為最受推薦的走訪時機。
+
+經濟地景：非歐元區的高消費陷阱與自然景點溢價，打破了「非歐元區較便宜」的直覺。受瑞士、北歐及冰島影響，非歐元區的高消費景點比例（64%）高於歐元區（56.9%）。此外，自然景觀與水岸海島景點有近 8 成屬於高消費區，顯示此類資源具備較高的市場溢價能力。
+
+市場分群： 依景點特性並透過 K-Means 聚類演算法（解釋力 83.5%），將市場精準切分為四大族群：
+
+精緻小眾秘境 (Cluster 1)：低人流、高消費、高安全性。
+
+高 CP 值避境 (Cluster 2)：中人流、低消費、高安全性。
+
+高貴明星景點 (Cluster 3)：高人流、高消費、高安全性。
+
+一線大城戰區 (Cluster 4)：極高人流、高消費、具潛在風險。
+:::
+
+```{r}
+#| label: setup
+#| include: false
+
+#library
+library(tidyverse)
+library(stringr)
+library(readr)
+library(ggplot2)
+library(scales)
+library(maps)
+library(dplyr)
+library(cluster)
+library(factoextra)
+library(knitr)
+library(quarto)
+
+#read data
+setwd("D:/R/project travel")
+raw_data <- read.csv("destinations.csv", stringsAsFactors = FALSE, fileEncoding = "latin1")
+```
+
+### **資料清整**
+
+在本階段，我們處理原始資料中的編碼問題（latin1 轉 UTF-8）、修正欄位錯位，並將非數值字串（如遊客數、物價等級）轉換為可分析的格式。
+
+實際處理如下：
+
+-   修復資料錯位，像是Category中出現如經緯度等數字
+
+-   統一標籤：
+
+    1.  旅遊人數：統一成數字，若為範圍數值則取中間值
+    2.  適合旅遊時間：統一為Spring/Summer/Fall/Winter/Year-round
+
+-   新增標籤：
+
+    1.  貨幣Currency：歐元區/非歐元區
+
+    2.  安全等級Safety：拆出安全等級(Safety Level)和需要注意的重點(Safety Notes)
+
+    3.  景點類別Category：區分為五大項如下
+
+        **人文城市 Urban & Culture** (涵蓋城市、歷史遺蹟、博物館)
+
+        **自然景觀 Nature & Landscapes** (涵蓋山脈、森林、國家公園)
+
+        **水岸海島 Coastal & Islands** (涵蓋海岸、海灘、島嶼)
+
+        **休閒娛樂 Leisure & Recreation** (涵蓋主題樂園、花園、遊樂場)
+
+        **其他 Other**
+
+```{r}
+#| label: data-cleaning
+#| message: false
+#| warning: false
+
+#定義清理函數與處理邏輯
+clean_tourists <- function(x) {
+  x <- str_to_lower(x)
+  x <- str_replace_all(x, ",", "")
+  
+  # 處理區間類型 (如 35-40 million)
+  if (str_detect(x, "-")) {
+    nums <- as.numeric(str_extract_all(x, "[0-9.]+")[[1]])
+    val <- mean(nums)
+  } else {
+    val <- as.numeric(str_extract(x, "[0-9.]+"))
+  }
+  
+  # 處理 million 單位
+  if (str_detect(x, "million")) {
+    val <- val * 1000000
+  }
+  return(val)
+}
+
+# 3. 主清理流程
+cleaned_df <- raw_data %>%
+  #修復資料錯位: 
+  mutate(across(everything(), as.character)) %>%
+  rowwise() %>%
+  mutate(
+    is_displaced = !is.na(as.numeric(Category)),
+    Region = if_else(is_displaced, "Unknown", Region),
+  ) %>%
+  
+  #統一標籤
+  mutate(
+    Currency = str_replace(Currency, "Euro \\(EUR\\)", "Euro"),
+    Language = str_replace(Language, " \\(and (.*?)\\)", ", \\1"),
+    
+    #簡化最佳旅遊時間
+    Best_Time_Simplified = case_when(
+      str_detect(`Best.Time.to.Visit`, "Year-round|anytime") ~ "Year-round",
+      TRUE ~ {
+        seasons <- c()
+        if(str_detect(`Best.Time.to.Visit`, "Spring")) seasons <- c(seasons, "Spring")
+        if(str_detect(`Best.Time.to.Visit`, "Summer")) seasons <- c(seasons, "Summer")
+        if(str_detect(`Best.Time.to.Visit`, "Fall|Autumn")) seasons <- c(seasons, "Fall")
+        if(str_detect(`Best.Time.to.Visit`, "Winter")) seasons <- c(seasons, "Winter")
+        paste(seasons, collapse = ", ")
+      }
+    )
+  ) %>%
+  
+  #轉換遊客數為數值
+  mutate(
+    Approximate_Annual_Tourists_Num = sapply(Approximate.Annual.Tourists, clean_tourists)
+  ) %>%
+  
+  #修正特定字串亂碼 (手動修正已知歐洲特殊字元)
+  mutate(across(where(is.character), ~str_replace_all(., "â€", "ö"))) %>%
+  mutate(across(where(is.character), ~str_replace_all(., "â€ ", "å"))) %>%
+  mutate(
+    # 拆分出安全等級
+    Safety_Level = str_split(Safety, " but") %>% map_chr(1) %>% str_trim() %>% str_replace(",$", ""),
+    Safety_Notes = str_extract_all(Safety, "(?<=of\\s|for\\s)[\\w\\s]+(?=,|\\.|$)") %>%
+      map_chr(~ {
+        if (length(.x) == 0) return("None")
+        clean_note <- str_replace_all(.x, "watch out |be aware |the ", "") %>%
+          str_replace_all(" and ", ", ") %>%
+          str_trim() %>%
+          str_to_title()
+        return(clean_note)
+      })
+  )%>%
+  mutate(
+    # 創建新類別欄位：Category_Group
+    Category_Group = case_when(
+      str_detect(Category, "City|Town|Village|District|Square|Museum|Castle|Fortress|Historical") ~ "Urban & Culture",
+      str_detect(Category, "Mountain|Valley|Forest|National Park|Lake|Cave|Nature") ~ "Nature & Landscapes",
+      str_detect(Category, "Coastal|Island|Beach") ~ "Coastal & Islands",
+      str_detect(Category, "Park|Garden") ~ "Leisure & Recreation",
+      TRUE ~ "Other"
+    )
+  )
+
+cleaned_df$Latitude <- as.numeric(cleaned_df$Latitude)
+cleaned_df$Longitude <- as.numeric(cleaned_df$Longitude)
+
+```
+
+<br>
+
+### **數據概況與景點分佈**
+
+```{r}
+#| label: tbl-metadata
+#| tbl-cap: "數據集欄位性質清單"
+
+# 1. 計算基本維度
+n_rows <- nrow(cleaned_df)
+n_cols <- ncol(cleaned_df)
+
+# 2. 建立欄位性質摘要表
+metadata_table <- tibble(
+  欄位名稱 = names(cleaned_df),
+  資料型態 = sapply(cleaned_df, class),
+  非缺失值數量 = colSums(!is.na(cleaned_df)),
+  範例數值 = sapply(cleaned_df, function(x) paste0(head(x, 1)))
+)
+
+# 輸出維度文字
+cat(paste0("資料總列數：**", n_rows, "**\n\n"))
+cat(paste0("資料總欄位數：**", n_cols, "**\n\n"))
+
+# 輸出美化表格
+knitr::kable(metadata_table)
+```
+
+<br>
+
+#### **景點類別佔比**
+
+**文化主導**：Urban & Culture（橘色）佔比最高，顯示這份資料集中，歷史城市與文化遺產仍是歐洲旅遊的核心。
+
+```{r}
+#| label: fig-category-donut
+#| fig-cap: "景點類別環狀圖分佈"
+#| message: false
+
+my_colors <- c(
+  "Urban & Culture" = "#E8A15F", "Nature & Landscapes" = "#228D6F",
+  "Coastal & Islands" = "#51A5F0", "Leisure & Recreation" = "#D64550", "Other" = "#B3B3B3"
+)
+
+category_dist <- cleaned_df %>%
+  count(Category_Group) %>%
+  mutate(percentage = (n /209 * 100))
+
+
+category_donut_final <- ggplot(category_dist, aes(x = 2, y = n, fill = Category_Group)) +
+  geom_bar(stat = "identity", color = "white", width = 1, position = position_stack(reverse = TRUE)) +
+  coord_polar(theta = "y", start = 0) +
+  geom_text(aes(label = paste0(round(percentage, 1), "%")), 
+            position = position_stack(vjust = 0.5, reverse = TRUE), 
+            color = "white", 
+            size = 5, 
+            fontface = "bold") +
+  scale_fill_manual(values = my_colors) +
+  xlim(0.5, 2.5) +
+  theme_void() +
+  theme(
+    legend.position = "right",
+    plot.title = element_text(face = "bold", hjust = 0.5, size = 18),
+    legend.text = element_text(size = 10)
+  ) +
+  labs(title = "Destinations by Category Group")
+
+print(category_donut_final)
+```
+
+<br>
+
+#### **地理空間分布圖**
+
+透過歸納後的五大類別，能更清晰地觀察到地理位置與景點類型之間的關聯性（如地圖所示）。
+
+```{r}
+#| label: fig-geo-map
+#| fig-cap: "歐洲景點地理位置分佈"
+#| message: false
+
+#取得歐洲地圖底圖資料
+map_countries <- c("Austria", "Belgium", "Denmark", "France", "Germany", "Greece", 
+                   "Iceland", "Italy", "Luxembourg", "Malta", "Monaco", "Norway", 
+                   "Portugal", "Russia", "Serbia", "Spain", "Sweden", "Switzerland", 
+                   "Turkey", "Ukraine", "UK", "Ireland")
+
+europe_map <- map_data("world", region = map_countries)
+
+
+geo_map_final <- ggplot() +
+  geom_polygon(data = europe_map, aes(x = long, y = lat, group = group), 
+               fill = "#f0f0f0", color = "white", size = 0.2) +
+  geom_point(data = cleaned_df, aes(x = Longitude, y = Latitude, color = Category_Group), 
+             size = 2.8, alpha = 0.8) +
+  scale_color_manual(values = my_colors) +
+  coord_fixed(ratio = 1.3, xlim = c(-25, 45), ylim = c(34, 72)) +
+  theme_minimal() +
+  labs(
+    title = "Geographic Distribution of European Tourism Spots",
+    subtitle = "Categorized by destination type across 21 selected countries",
+    x = "Longitude", y = "Latitude",
+    color = "Category Group"
+  ) +
+  theme(
+    legend.position = "bottom",
+    panel.grid = element_blank(),
+    plot.title = element_text(face = "bold", size = 16, color = "#333333"),
+    legend.text = element_text(size = 10)
+  )
+
+print(geo_map_final)
+
+```
+
+<br>
+
+<br>
+
+### **遊客流量分析**
+
+#### **遊客流量分布與熱門景點TOP10**
+
+約1/3的觀光地區每年的觀光人潮集中在50-200萬人(0.5-2M)。而遊客數最多的地點第一名為巴黎(Paris)，每年湧入3千8百萬人，遠遠高於第二名倫敦(2千5百萬人)，第三\~十名則落在1千萬\~1千5百萬人。
+
+遊客流量分布圖右側的長尾代表了極端熱門的景點（如年遊客量超過 10M 的倫敦、巴黎、羅馬）。在分析中，雖然它們屬於 Outliers (離群值)，但因為它們代表了具備高度商業價值的「地標級」目的地，因此在此處將之保留下來。
+
+```{r}
+#| label: fig-tourist-num-bin
+#| message: false
+
+#資料處理：建立封頂區間 (Bins)
+dist_binned <- cleaned_df %>%
+  filter(!is.na(Approximate_Annual_Tourists_Num)) %>%
+  mutate(
+    tourist_bins = cut(
+      Approximate_Annual_Tourists_Num,
+      breaks = c(0,1e5,3e5, 5e5, 1e6, 2e6, 3e6, 4e6, 5e6,1e7, Inf),
+      labels = c("0-0.1M","0.1-0.3M","0.3-0.5M", "0.5-1M", "1-2M", 
+                 "2-3M", "3-4M", "4-5M","5-10M", "10M+"),
+      include.lowest = TRUE,
+      right = TRUE
+    )
+  )
+
+tourist_volume <- ggplot(dist_binned, aes(x = tourist_bins)) +
+  geom_bar(fill = "#56B4E9", color = "white", alpha = 0.8) +
+  geom_text(stat = 'count', aes(label = ..count..), vjust = -0.5, size = 3.5) +
+  theme_minimal() +
+  labs(
+    title = "Annual Tourist Volume Distribution",
+    subtitle = "Focusing on lower ranges with a '10M+' cap for outliers",
+    x = "Tourist Count Intervals",
+    y = "Number of Destinations"
+  ) +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1), # 文字旋轉避免重疊
+    plot.title = element_text(face = "bold", size = 16),
+    panel.grid.major.x = element_blank()
+  )
+```
+
+```{r}
+#| label: fig-pop-des-bin 
+#| layout-ncol: 1
+#| message: false  
+
+hot_travel_place <- cleaned_df %>% 
+  filter(!is.na(Approximate_Annual_Tourists_Num)) %>% 
+  filter(Approximate_Annual_Tourists_Num>=10000000) 
+ 
+
+hot_travel_flg <-ggplot(hot_travel_place, aes(x = reorder(Destination, Approximate_Annual_Tourists_Num), 
+                             y = Approximate_Annual_Tourists_Num)) +
+  geom_bar(stat = "identity", fill = "#56B4E9", color = "white", alpha = 0.9) +
+  geom_text(aes(label = paste0(round(Approximate_Annual_Tourists_Num / 1e6, 1), "M")), 
+            hjust = -0.2, size = 3.5, fontface = "bold") +
+  #橫向長條圖
+  coord_flip() +
+  # Y 軸標籤
+  scale_y_continuous(labels = scales::label_number(scale = 1e-6, suffix = "M"),
+                     expand = expansion(mult = c(0, 0.15))) + 
+  theme_minimal() +
+  labs(
+    title = "Top 10 Most Popular Destinations in Europe",
+    subtitle = "Based on average annual tourist volume",
+    x = "Destination",
+    y = "Annual Tourists (Millions)"
+  ) +
+  theme(
+    plot.title = element_text(face = "bold", size = 16),
+    panel.grid.major.y = element_blank(), # 移除 Y 軸格線
+    axis.text = element_text(size = 10, color = "black")
+  ) 
+```
+
+```{r}
+#| label: fig-tourists
+#| fig-cap: "遊客數據分析"
+#| fig-subcap: 
+#|   - "遊客年流量分布"
+#|   - "熱門景點 Top 10"
+#| layout-ncol: 2
+
+# 第一張圖程式碼
+print(tourist_volume)
+
+# 第二張圖程式碼
+print(hot_travel_flg)
+```
+
+<br>
+
+#### **各類別遊客量分析 (Boxplot)**
+
+由於都市人文景點佔了超過60%，各地區遊客數相對較為分散，而那些紅色的離群值點代表了千萬級別的國際大都市，其吸客能力遠超其他類別。
+
+除了都市人文外，其餘的遊客數幾乎都落在5百萬以下，尤其以自然景觀的遊客數相對集中在低遊客數。
+
+**視覺化技術說明**：為了處理原始數據中極大的量級差異，使用了箱型圖來呈現數據的四分位距（IQR）。
+
+```{r}
+#| label: fig-touristxcategory-boxplot
+#| fig-cap: "每年遊客流量分布-以景點屬性區分"
+#| message: false
+
+##各類別遊客量箱型圖 (Boxplot by Category)
+# 1. 準備繪圖資料 (排除 NA)
+boxplot_data <- cleaned_df %>%
+  filter(!is.na(Approximate_Annual_Tourists_Num))
+
+# 2. 繪製箱型圖
+category_boxplot <- ggplot(boxplot_data, aes(x = Category_Group, y = Approximate_Annual_Tourists_Num, fill = Category_Group)) +
+  # 箱型圖
+  geom_boxplot(outlier.colour = "red", outlier.shape = 16, outlier.size = 2, alpha = 0.7) +
+  scale_fill_manual(values = my_colors) +
+  scale_y_continuous(labels = label_number(scale = 1e-6, suffix = "M")) +
+  theme_minimal() +
+  labs(
+    title = "Tourist Volume Distribution by Category",
+    subtitle = "Comparing popularity ranges and identifying superstar destinations (red dots)",
+    x = "Category Group",
+    y = "Annual Tourists (Millions)",
+    fill = "Category Group"
+  ) +
+  theme(
+    legend.position = "none", # 標籤已在 X 軸，可隱藏圖例
+    plot.title = element_text(face = "bold", size = 16),
+    axis.text.x = element_text(size = 10)
+  )
+
+print(category_boxplot)
+```
+
+<br>
+
+### **經濟、旅遊時間與安全性分析**
+
+#### **生活消費等級**
+
+整體消費來看，大多集中在高或中度消費。以景點屬性區分消費水準(下左圖)，將近9成的自然景觀為高消費；其次，水岸海島也有8成左右屬於高消費，由於這些地方很多屬於度假勝地，在消費上通常會較高，或是國家公園的交通成本，以及可能含有門票費等因素造成消費水平較高。而休閒娛樂的景點數量不多，大部分為免費可入場的花園。
+
+歐元區與非歐元區相比之下，非歐元區的生活消費較高，由於非歐元區涵蓋瑞士、北歐與冰島這些高消費的國家。
+
+```{r}
+#| label: cost-analysis_Category Group
+#| message: false
+
+currency<- cleaned_df %>%
+  mutate(Cost_of_Living_Fixed = case_when(
+    Cost.of.Living %in% c("Extremely high", "High", "Medium-high") ~ "High",
+    Cost.of.Living == "Medium" ~ "Medium",
+    Cost.of.Living %in% c("Free", "Varies") ~ "Low",
+    TRUE ~ "Unknown" # 以防萬一還有漏網之魚
+  ))
+
+currency$Cost_of_Living_Fixed <- factor(currency$Cost_of_Living_Fixed, 
+                               levels = c("Low", "Medium", "High"))
+currency <- currency %>%
+  mutate(Currency_Group = if_else(str_detect(Currency, "Euro"), "Eurozone", "Non-Eurozone"))
+
+
+col_stacked_bar <- ggplot(currency, aes(x = Category_Group, fill = Cost_of_Living_Fixed)) +
+  geom_bar(position = "fill") + # 使用 "fill" 會將長條轉換為百分比堆疊 (0-100%)
+  scale_y_continuous(labels = scales::percent) +
+  # 設定物價顏色 (建議：Low=綠, Medium=黃/橘, High=紅)
+  scale_fill_manual(values = c("Low" = "#2ecc71", "Medium" = "#f1c40f", "High" = "#e74c3c")) +
+  theme_minimal() +
+  labs(
+    title = "Cost of Living Distribution by Category",
+    subtitle = "Percentage of budget levels across different destination types",
+    x = "Category Group",
+    y = "Percentage (%)",
+    fill = "Cost of Living"
+  ) +
+  theme(
+    plot.title = element_text(face = "bold", size = 16),
+    legend.position = "right"
+  )
+```
+
+```{r}
+#| label: cost-analysis_Euro_VS_Non-Euro
+#| message: false
+
+# 歐元區 vs 非歐元區 物價對比
+currency_analysis <- currency %>%
+  group_by(Currency_Group, Cost_of_Living_Fixed) %>%
+  summarise(count = n()) %>%
+  mutate(percentage = count / sum(count) * 100)
+
+# 繪製對比圖
+Euro_VS_NonEuro <- ggplot(currency_analysis, aes(x = Currency_Group, y = percentage, fill = Cost_of_Living_Fixed)) +
+  geom_bar(stat = "identity", position = "dodge") + # 使用 "dodge" 讓長條並排對比
+  scale_fill_manual(values = c("Low" = "#2ecc71", "Medium" = "#f1c40f", "High" = "#e74c3c")) +
+  theme_minimal() +
+  labs(
+    title = "Cost of Living: Eurozone vs. Non-Eurozone",
+    subtitle = "Comparing price levels based on currency environment",
+    x = "Currency Environment",
+    y = "Percentage of Destinations (%)",
+    fill = "Cost of Living"
+  )
+```
+
+```{r}
+#| label: fig-Cost-of-Living
+#| fig-cap: "經濟消費等級"
+#| fig-subcap: 
+#|   - "生活消費:以景點屬性區分"
+#|   - "生活消費: 歐元區 vs.非歐元區"
+#| layout-ncol: 2
+
+# 第一張圖程式碼
+print(col_stacked_bar)
+
+# 第二張圖程式碼
+print(Euro_VS_NonEuro)
+```
+
+<br>
+
+**旅遊時間推薦**
+
+大部分歐洲地區的景點，以春秋為最適合旅遊的季節，但像是高緯度地區如北歐或冰島，也有部分景點適合夏天走訪。
+
+雖然冬天整體為歐洲淡季，但特定的景點在冬天呈現亮點，這反映了雪季與聖誕市集的文化吸引力，像是滑雪勝地：策馬特(瑞士)、因斯布魯克(奧地利)......等；芬蘭拉普蘭區有聖誕老人村，濱湖采爾(奧地利)也有著名的聖誕市集。
+
+```{r}
+#| label: fig-bestseason-Heatmap
+#| fig-cap: "最適合拜訪的季節：TOP 50 熱門景點"
+#| message: false
+
+heatmap_data <- cleaned_df %>%
+  filter(!is.na(Best_Time_Simplified) & Best_Time_Simplified != "") %>%
+  arrange(desc(Approximate_Annual_Tourists_Num)) %>%
+  head(50) %>% # 取前 50 名
+  separate_rows(Best_Time_Simplified, sep = ",\\s*") %>%
+  mutate(Present = 1) 
+
+
+heatmap_data$Best_Time_Simplified <- factor(
+  heatmap_data$Best_Time_Simplified, 
+  levels = c("Spring", "Summer", "Fall", "Winter", "Year-round")
+)
+
+
+ggplot(heatmap_data, aes(x = Best_Time_Simplified, y = reorder(Destination, Approximate_Annual_Tourists_Num), fill = Present)) +
+  geom_tile(color = "white", size = 0.2) +
+  scale_fill_gradient(low = "#e0f3f8", high = "#0288d1") +
+  theme_minimal() +
+  labs(
+    title = "Top 50 Destinations: Best Time to Visit Heatmap",
+    subtitle = "Visualizing travel windows for Europe's most popular spots",
+    x = "Recommended Season",
+    y = "Destination",
+    fill = "Recommended"
+  ) +
+  theme(
+    legend.position = "none", # 0/1 不需要圖例
+    axis.text.y = element_text(size = 8),
+    plot.title = element_text(face = "bold", size = 16),
+    panel.grid = element_blank()
+  )
+```
+
+<br>
+
+#### **景點安全性分析**
+
+大部分的景點並無安全疑慮，整體而言比較需要注意的是偷竊的狀況，尤其重點旅遊城市需特別注意。
+
+```{r}
+#| label: fig-geo-safetymap
+#| message: false
+
+my_colors2 <- c(
+  "Pickpockets" = "#D64550", "Bears" = "#228D6F",
+  "Crowds" = "#51A5F0", "Ongoing Conflict" = "#FFA488", "Potential Risks" = "#FFEE99","None" = "#B3B3B3"
+)
+
+geo_map_safetynote <- ggplot() +
+  geom_polygon(data = europe_map, aes(x = long, y = lat, group = group), 
+               fill = "#f0f0f0", color = "white", size = 0.2) +
+  geom_point(data = cleaned_df, aes(x = Longitude, y = Latitude, color = Safety_Notes), 
+             size = 2.8, alpha = 0.8) +
+  scale_color_manual(values = my_colors2) +
+  coord_fixed(ratio = 1.3, xlim = c(-25, 45), ylim = c(34, 72)) +
+  theme_minimal() +
+  labs(
+    title = "Geographic Distribution of Safety_Notes",
+    subtitle = "Safety Notes by destination type across 21 selected countries",
+    x = "Longitude", y = "Latitude",
+    color = "Safety_Notes"
+  ) +
+  theme(
+    legend.position = "bottom",
+    panel.grid = element_blank(),
+    plot.title = element_text(face = "bold", size = 16, color = "#333333"),
+    legend.text = element_text(size = 10)
+  )
+
+
+```
+
+```{r}
+#| label: fig-safetynote-bin
+#| message: false
+
+# 處理安全標籤數據
+safety_summary <- cleaned_df %>%
+  filter(!is.na(Safety_Notes) & Safety_Notes != "") %>%
+  separate_rows(Safety_Notes, sep = ",\\s*") %>% 
+  group_by(Safety_Notes) %>%
+  summarise(Count = n()) %>%
+  arrange(desc(Count))
+
+safety_keyword_plot <- ggplot(safety_summary, aes(x = reorder(Safety_Notes, Count), y = Count)) +
+  geom_bar(stat = "identity", fill = "#E67E22", color = "white", alpha = 0.9) +
+  geom_text(aes(label = Count), hjust = -0.3, size = 4, fontface = "bold") +
+  coord_flip() +
+  scale_y_continuous(expand = expansion(mult = c(0, 0.15))) +
+  theme_minimal() +
+  labs(
+    title = "Key Safety Concerns in European Destinations",
+    subtitle = "Frequency of risk keywords extracted from safety descriptions",
+    x = "Safety Labels",
+    y = "Frequency (Number of Spots)"
+  ) +
+  theme(
+    plot.title = element_text(face = "bold", size = 18, color = "#D35400"),
+    panel.grid.major.y = element_blank(), 
+    axis.text = element_text(size = 11, color = "black")
+  )
+```
+
+```{r}
+#| label: fig-SafetyNotes
+#| fig-cap: "歐洲各景點安全警示分布"
+#| fig-subcap: 
+#|   - "各景點需要注意之安全警示"
+#|   - "歐洲景點安全警示分布"
+#| layout-ncol: 2
+
+# 第一張圖程式碼
+print(geo_map_safetynote)
+
+# 第二張圖程式碼
+print(safety_keyword_plot)
+```
+
+<br>
+
+### **K-Means 客群市場分群分析**
+
+#### K-Means分群決定：手肘法(Elbow Method)
+
+以手肘法(Elbow Method) 確認K-Means應該要分成多少族群，從結果來看，在k=4時，群內平方和(Within Sum of Square, WSS) 大幅度下降，代表分群效果顯著，分4群已可以抓到數據中的主要差異，再區分下去的效益並不高。
+
+```{r}
+#| label: fig-fviz
+#| fig-cap: "以手肘圖確認Kmeans分群"
+#| message: false
+
+cluster_df <- currency %>%
+  filter(!is.na(Approximate_Annual_Tourists_Num)) %>%
+  mutate(
+    cost_score = as.numeric(Cost_of_Living_Fixed),
+    safety_issue_count = case_when(
+      is.na(Safety_Notes) | Safety_Notes == "None" ~ 0,
+      TRUE ~ as.numeric(str_count(Safety_Notes, ",") + 1)
+    ),
+    log_tourists = log10(Approximate_Annual_Tourists_Num + 1)#遊客數太大取log
+  ) %>%
+  select(Destination, Country, log_tourists, cost_score, safety_issue_count)
+
+
+cluster_df <- na.omit(cluster_df)
+
+cluster_scaled <- scale(cluster_df %>% select(-c(Destination,Country)))
+
+# 繪製手肘圖
+fviz_nbclust(cluster_scaled, kmeans, method = "wss") +
+  geom_vline(xintercept = 4, linetype = 2) + #單純輔助線
+  labs(title = "Elbow Method for Optimal K")
+
+```
+
+::: callout-tip
+##### 什麼是「群內平方和 (Within Sum of Square, WSS)」?
+
+對於某個群組 $C$，WSS 計算公式如下：
+
+$$WSS = \sum_{i \in C} (x_i - \mu)^2$$
+
+$x_i$：群組內的每一個資料點。 $\mu$：該群組的中心點（平均值）。
+
+所以我們去計算每一個點和該群組中心點的距離，最後將所有群組（$k=1 \dots 4$）的 WSS 加起來，即為所求。
+
+簡單翻譯WSS為「群組的擠迫程度」。也就是當 WSS 越小，代表同一群裡的資料點靠得越近（越像）。雖然WSS越小代表區分的越仔細，但需要注意和k之間的平衡，太多群會有過度擬合的問題，反而失去分類的意義。所以我們要找那個「手肘」，也就是當我增加群數時，WSS 卻不再大幅下降的那個平衡點
+:::
+
+<br>
+
+#### K-Means分群
+
+```         
+```
+
+```         
+```
+
+::: callout-note
+##### 四族群市場區隔分析 (Market Segmentation)
+
+最後來觀察分群後的結果，藉由觀察後的特徵將四族群整理為以下
+
+| Cluster | 命名 (Persona) | 數據特徵 (Key Characteristics) | 商業洞察 (Business Insight) |
+|:--------------:|:-----------------|:----------------|:---------------------|
+| **1** | **Hidden Premium Gems**<br>(精緻小眾秘境) | 遊客少 (100k)、消費偏高 (2.5)、安全 (0) | 適合追求**高品質、安靜且預算充足**的遊客。 |
+| **2** | **Budget-Friendly Havens**<br>(高 CP 值旅遊區) | 遊客中等 (1M)、物價最低 (1.8)、安全 (0) | 最吸引**預算型旅客或背包客**的區域，因為安全且負擔輕。 |
+| **3** | **Elite Tourist Hotspots**<br>(高貴明星景點) | 遊客多 (1.5M)、**物價最高 (3.0)**、安全 (0) | 典型的熱門高端景點。雖然貴，但治安維護佳，深受**大眾富裕階層**喜愛。 |
+| **4** | **Iconic Metropolitan Hubs**<br>(一線大城戰區) | **遊客最多 (3.5M)**、物價高 (2.73)、**風險較高 (1.0)** | **歐洲的門面**（如巴黎、羅馬），名氣高，但扒手詐騙也最多，需特別提醒旅客。 |
+:::
+
+```{r}
+#| label: tbl-cluster-summary
+#| tbl-cap: "歐洲旅遊景點分群特徵統計"
+#| message: false 
+
+set.seed(123)
+final_km <- kmeans(cluster_scaled, centers = 4, nstart = 25)
+cluster_df$cluster <- as.factor(final_km$cluster)
+
+#觀察四群特徵 
+cluster_summary <- cluster_df %>%
+  group_by(cluster) %>%
+  summarise(
+    avg_tourists = median(10^log_tourists - 1), # 還原 Log 變數，計算原始狀況
+    avg_cost = mean(cost_score),
+    avg_safety = mean(safety_issue_count),
+    count = n()
+  )
+
+cluster_summary_clean <- cluster_summary %>%
+  mutate(across(starts_with("avg"), ~ round(., 2)))
+
+kable(cluster_summary_clean, 
+      col.names = c("分群編號", "遊客中位數", "平均物價得分", "平均安全風險數", "景點數量"))
+
+
+```
+
+```{r}
+#| label: kmeans-analysis
+#| fig-cap: "Kmeans分群結果"
+#| message: false 
+
+fviz_cluster(final_km, data = cluster_scaled,
+             geom = "point",
+             ellipse.type = "convex", 
+             palette = "jco",
+             ggtheme = theme_minimal(),
+             main = "European Destination Segments") +
+  labs(subtitle = "Segmentation based on Tourist Volume, Cost, and Safety Risks")
+
+```
+
+::: callout-tip
+###### **聚類分析圖（Clustering）**
+
+透過 PCA 降維視覺化，可以觀察到 Cluster 4 (紅色) 呈現出顯著的離群特徵，與其他旅遊類別有明顯的空間分隔。而 Cluster 3 (灰色) 呈現線性的分佈，反映了其在安全性指標上的高度一致性；反之，如果多邊形很大（如黃色的 Cluster 2），代表這群景點內部的差異性較大。
+
+整體模型解釋力高達 83.5%(Dim1+Dim2)，成功識別出歐洲旅遊市場中四個具備統計顯著性的景點標籤。
+:::
+
+<br>
+
+最後以分群結果區分不同屬性，屬於水岸海島的景點有較高比例屬於高貴明星景點與精緻小眾秘境；屬於都市人文的景點不意外的在一線大城戰區的比例較高。
+
+```{r}
+#| label: kmeans-analysis-CategoryGroup
+#| fig-cap: "以景點屬性觀察K-Means結果"
+#| message: false
+
+
+cleaned_df_final <- cleaned_df %>%
+  left_join(cluster_df %>% select(Destination,Country, cluster), by = c("Destination", "Country"))
+
+
+cluster_category_summary <- cleaned_df_final %>%
+  filter(!is.na(cluster)) %>%
+  count(Category_Group, cluster) %>%
+  group_by(Category_Group) %>%
+  mutate(percent = n / sum(n))
+
+
+ggplot(cluster_category_summary, aes(x = Category_Group, y = percent, fill = cluster)) +
+  geom_bar(stat = "identity") +
+  scale_y_continuous(labels = scales::percent) +
+  scale_fill_brewer(palette = "Set3") + # 換個柔和的色調
+  theme_minimal() +
+  labs(
+    title = "Market Segment Distribution by Category",
+    subtitle = "How different destination types fall into our 4 clusters",
+    x = "Category Group",
+    y = "Percentage of Destinations",
+    fill = "Cluster Tag"
+  ) +
+  theme(plot.title = element_text(face = "bold", size = 16))
+```
+
+<br>
+
+## **延伸討論**
+
+-   從本數據來觀察，歐洲最適合的旅遊時間，應不等同於遊客最多的時間點，比較常見的假期會落在暑假，或是冬天的寒假與聖誕假期，反而並不是歐洲最適合的旅遊時間，如何以此賣點，吸引旅客於最佳旅遊時間來玩，是可思考的行銷點。
+
+    <br>
+
+-   **你適合哪一類型的旅遊景點? 來玩玩看吧!**
+
+```{r}
+#| echo: false
+library(jsonlite)
+# 將資料轉為 JSON 格式，並建立一個名為 travel_json 的變數
+travel_json <- toJSON(cleaned_df_final)
+write.csv(cleaned_df_final, "cleaned_df_final.csv", row.names = FALSE)
+```
+
+```{ojs}
+//| echo: false
+
+// 1. 讀取資料
+data = FileAttachment("cleaned_df_final.csv").csv({typed: true})
+
+// 2. 建立輸入介面
+viewof budget = Inputs.select(["Low", "Medium", "High"], {label: "💰您的最高預算:", value: "Medium"})
+viewof category = Inputs.select(["Urban & Culture", "Nature & Landscapes", "Coastal & Islands", "Leisure & Recreation"], {label: "🌲偏好景點類型:"})
+viewof safety = Inputs.radio(["重視安全 (Safety First)", "可接受一般風險"], {label: "🛡安全容忍度:", value: "重視安全 (Safety First)"})
+
+// 3. 核心處理與過濾邏輯
+recommendations = {
+  // A. 預處理：先把 1,2,3,4 標籤化，確保表格顯示不為空
+  let processed = data.map(d => {
+    let costText = "";
+    // 對應你的分群數據特徵
+    if (String(d.cluster) === "2") costText = "低消費";
+    else if (String(d.cluster) === "1" || String(d.cluster) === "4") costText = "中消費";
+    else costText = "高消費";
+    
+    return { ...d, Cost_Label: costText };
+  });
+
+  // B. 開始過濾
+  return processed.filter(d => {
+    // 1. 類別過濾 (必須精確符合)
+    const matchCategory = d.Category_Group === category;
+    
+    // 2. 預算過濾 (全相容邏輯)
+    let matchBudget = false;
+    if (budget === "Low") {
+      matchBudget = (String(d.cluster) === "2"); // 只有低預算
+    } else if (budget === "Medium") {
+      matchBudget = (String(d.cluster) === "2" || String(d.cluster) === "1" || String(d.cluster) === "4"); // 中預算包含低
+    } else {
+      matchBudget = true; // 高預算什麼都能去
+    }
+
+    // 3. 安全過濾 (全相容邏輯)
+    let matchSafety = false;
+    if (safety === "重視安全 (Safety First)") {
+      matchSafety = (String(d.cluster) !== "4"); // 排除一線大城風險
+    } else {
+      matchSafety = true; // 可接受風險的人什麼都能去
+    }
+
+    return matchCategory && matchBudget && matchSafety;
+  });
+}
+
+// 4. 顯示結果
+{
+  if (recommendations.length === 0) {
+    return html`<div style="padding:15px; background:#fff3cd; border-radius:8px; border: 1px solid #ffeeba;">
+      ⚠️ <strong>目前的篩選組合沒有匹配結果。</strong>
+    </div>`;
+  } else {
+    return Inputs.table(recommendations, {
+      columns: ["Destination", "Country", "Approximate_Annual_Tourists_Num", "Cost_Label"],
+      header: {
+        Destination: "景點名稱",
+        Country: "國家",
+        Approximate_Annual_Tourists_Num: "年遊客量",
+        Cost_Label: "消費等級"
+      },
+      sort: "Approximate_Annual_Tourists_Num",
+      reverse: true // 預設顯示最熱門的
+    });
+  }
+}
+```
