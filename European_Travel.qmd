@@ -1,9 +1,9 @@
 ---
-title: "歐洲旅遊景點數據分析報告"
+title: "歐洲旅遊景點數據分析報告 European Travel Destination Analysis"
 subtitle: "資料清整、圖表視覺化、Kmeans分群"
 format: 
   html:
-    embed-resources: true  
+    embed-resources: FALSE  
     toc: true              
     toc-title: "分析目錄"
     code-fold: true
@@ -741,7 +741,7 @@ $x_i$：群組內的每一個資料點。 $\mu$：該群組的中心點（平均
 最後來觀察分群後的結果，藉由觀察後的特徵將四族群整理為以下
 
 | Cluster | 命名 (Persona) | 數據特徵 (Key Characteristics) | 商業洞察 (Business Insight) |
-|:--------------:|:-----------------|:----------------|:---------------------|
+|:---------------:|:----------------|:----------------|:--------------------|
 | **1** | **Hidden Premium Gems**<br>(精緻小眾秘境) | 遊客少 (100k)、消費偏高 (2.5)、安全 (0) | 適合追求**高品質、安靜且預算充足**的遊客。 |
 | **2** | **Budget-Friendly Havens**<br>(高 CP 值旅遊區) | 遊客中等 (1M)、物價最低 (1.8)、安全 (0) | 最吸引**預算型旅客或背包客**的區域，因為安全且負擔輕。 |
 | **3** | **Elite Tourist Hotspots**<br>(高貴明星景點) | 遊客多 (1.5M)、**物價最高 (3.0)**、安全 (0) | 典型的熱門高端景點。雖然貴，但治安維護佳，深受**大眾富裕階層**喜愛。 |
